@@ -8,12 +8,14 @@ https://github.com/danielcherubini/elegoo-homeassistant
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from functools import partial
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 import voluptuous as vol
 from aiohttp import ClientError
+from homeassistant.components.file_upload import process_uploaded_file
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_IP_ADDRESS, Platform, UnitOfTime
@@ -236,6 +238,33 @@ async def _async_start_print(hass: HomeAssistant, call: ServiceCall) -> dict:
     return {"success": True, "message": f"Print started: {filename}"}
 
 
+SERVICE_PROBE_FILE = "probe_file"
+SERVICE_PROBE_FILE_SCHEMA = vol.Schema({vol.Required("file"): str})
+
+
+async def _async_probe_file(hass: HomeAssistant, call: ServiceCall) -> dict:
+    """
+    EXPERIMENT: receive a file uploaded through a `file` selector.
+
+    The frontend uploads the chosen file to /api/file_upload and passes the
+    returned file_id as the field value; process_uploaded_file hands the path
+    to us and removes the temp file afterwards. Reports name, size and MD5 -
+    nothing is sent to the printer.
+    """
+    file_id = call.data["file"]
+
+    def _read() -> tuple[str, int, str]:
+        with process_uploaded_file(hass, file_id) as path:
+            data = path.read_bytes()
+            return path.name, len(data), hashlib.md5(data).hexdigest()  # noqa: S324
+
+    try:
+        name, size, digest = await hass.async_add_executor_job(_read)
+    except Exception as err:  # noqa: BLE001 - experiment: report anything
+        return {"success": False, "error": repr(err)}
+    return {"success": True, "name": name, "size": size, "md5": digest}
+
+
 # https://developers.home-assistant.io/docs/creating_integration_file_structure/#defining-services
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG001
     """Set up the Elegoo Printer component."""
@@ -258,6 +287,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG00
         partial(_async_start_print, hass),
         schema=SERVICE_START_PRINT_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_PROBE_FILE,
+        partial(_async_probe_file, hass),
+        schema=SERVICE_PROBE_FILE_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
     )
     return True
 

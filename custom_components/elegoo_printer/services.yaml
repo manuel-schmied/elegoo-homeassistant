@@ -59,3 +59,18 @@ start_print:
       default: true
       selector:
         boolean:
+
+probe_file:
+  name: Probe uploaded file (experiment)
+  description: >-
+    Experiment - does a file selector work in a service field? Reports the
+    uploaded file's name, size and MD5. Nothing is sent to the printer.
+  fields:
+    file:
+      name: G-code file
+      description: Pick a .gcode file on this device.
+      required: true
+      selector:
+        file:
+          accept: ".gcode"
+
